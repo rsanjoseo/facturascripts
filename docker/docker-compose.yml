@@ -1,0 +1,108 @@
+networks:
+  fs_network:
+    name: fs_network
+
+services:
+    fs_nginx:
+        image: nginx:alpine
+        container_name: ${NGINX_CONTAINER}
+        restart: ${RESTART}
+        dns:
+            - 8.8.8.8
+            - 8.8.4.4
+            - 127.0.0.11
+        env_file: ".env"
+        build:
+            dockerfile: ${NGINX_DIRECTORY}/Dockerfile
+            context: .
+        ports:
+            - "${HTTP_PORT}:80"
+            - "${HTTPS_PORT}:443"
+        environment:
+            - PROJECT_NAME=${PROJECT_NAME}
+            - NGINX_HOST=${NGINX_HOST}
+            - XDEBUG_MODE=${PHP_XDEBUG_MODE}
+        networks:
+            - fs_network
+        volumes:
+            - "${CODE_DIRECTORY}:/var/www/html:rw"
+            - "${NGINX_CONFIG_DIRECTORY}/default.conf:/etc/nginx/conf.d/default.conf"
+            - "${NGINX_CONFIG_DIRECTORY}/fastcgi_params.conf:/etc/nginx/conf.d/fastcgi_params.conf"
+            - "${NGINX_CONFIG_DIRECTORY}/default.template.conf:/etc/nginx/conf.d/default.template"
+            - "${NGINX_CONFIG_DIRECTORY}/proxy-settings.conf:/etc/nginx/conf.d/proxy-settings.conf:ro"
+            - "${NGINX_CONFIG_DIRECTORY}/client_max_body_size.conf:/etc/nginx/conf.d/client_max_body_size.conf:ro"
+            - "${NGINX_CONFIG_DIRECTORY}/options-ssl-nginx.conf:/etc/letsencrypt/options-ssl-nginx.conf:ro"
+            - "${NGINX_LOG_DIRECTORY}:/var/log/nginx:rw"
+            - "${CERTS_DIRECTORY}/fullchain.pem:/etc/letsencrypt/live/localhost/fullchain.pem:rw"
+            - "${CERTS_DIRECTORY}/privkey.pem:/etc/letsencrypt/live/localhost/privkey.pem:rw"
+        depends_on:
+            - fs_php
+            - fs_db
+
+    fs_php:
+        container_name: ${PHP_CONTAINER}
+        restart: ${RESTART}
+        env_file: ".env"
+        build:
+            dockerfile: ${PHP_CONFIG_DIRECTORY}/Dockerfile
+            context: .
+            args:
+                - USER_ID=${USER_ID}
+                - GROUP_ID=${GROUP_ID}
+        environment:
+            - USER_ID=${USER_ID}
+            - GROUP_ID=${GROUP_ID}
+            - XDEBUG_CONFIG="remote_host=host.docker.internal remote_port=9003"
+            - PHP_IDE_CONFIG=serverName=${PROJECT_NAME}
+        networks:
+            - fs_network
+        user: ${USER_ID}:${GROUP_ID}
+        volumes:
+            - "${PHP_CONFIG_DIRECTORY}/php.ini:/usr/local/etc/php/conf.d/php.ini"
+            - "${PHP_FPM_CONFIG_DIRECTORY}/www.conf:/usr/local/etc/php-fpm.d/www.conf"
+            - "${CODE_DIRECTORY}:/var/www/html:rw"
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+
+    fs_db:
+        platform: linux/x86_64
+        image: mariadb:${MARIADB_VERSION}
+        container_name: ${MARIADB_CONTAINER}
+        restart: ${RESTART}
+        env_file: ".env"
+        build:
+            dockerfile: ${MARIADB_DIRECTORY}/Dockerfile
+            context: .
+        ports:
+            - "${MARIADB_PORT}:3306"
+        environment:
+            - MARIADB_DATABASE=${MARIADB_DATABASE}
+            - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+            - MARIADB_USER=${MARIADB_USER}
+            - MARIADB_PASSWORD=${MARIADB_PASSWORD}
+        networks:
+            - fs_network
+        volumes:
+            - "${PROJECT_NAME}_mariadb_data:/var/lib/mysql"
+            - "${MARIADB_INIT_DB_DIRECTORY}:/docker-entrypoint-initdb.d"
+            - "${MARIADB_CONF_DIRECTORY}:/etc/mysql/conf.d"
+            - "${MARIADB_CONF_DIRECTORY}/my.cnf:/etc/mysql/mariadb.conf.d/my.cnf:rw"
+            - "${MARIADB_LOG_DIRECTORY}:/var/log/mysql"
+
+    fs_phpmyadmin:
+        image: phpmyadmin/phpmyadmin
+        container_name: ${PHPMYADMIN_CONTAINER}
+        depends_on:
+            - fs_db
+        restart: ${RESTART}
+        ports:
+            - '${PHPMYADMIN_PORT}:80'
+        env_file: '.env'
+        environment:
+            - PMA_HOST=fs_db
+            - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+        networks:
+            - fs_network
+
+volumes:
+  fs_mariadb_data:
